@@ -2,7 +2,27 @@
 
 ## Vue d'ensemble
 
-L'API REST est documentée via **Swagger / OpenAPI 3.0** et permet la génération automatique d'un client TypeScript pour le frontend React.
+L'API REST est documentée via **Swagger / OpenAPI 3.0**, **généré automatiquement depuis le code** backend (TypeScript + Express). Cette documentation permet la génération automatique d'un client TypeScript pour le frontend React.
+
+---
+
+## Stratégie de génération OpenAPI
+
+### Approche code-first
+
+La documentation OpenAPI est **générée à partir du code backend**, et non écrite manuellement. Cette approche garantit que la documentation est toujours synchronisée avec l'implémentation.
+
+**Outils recommandés pour Express + TypeScript :**
+- **tsoa** : Génération à partir de décorateurs TypeScript
+- **swagger-jsdoc** : Génération à partir de commentaires JSDoc
+- **routing-controllers + class-validator** : Décorateurs avec validation intégrée
+
+### Workflow de génération
+
+1. Le développeur ajoute des décorateurs/annotations aux controllers et DTOs
+2. Un script de build génère le fichier `openapi.json` ou `openapi.yaml`
+3. Le fichier OpenAPI est exposé via un endpoint `/api-docs`
+4. Un script frontend génère le client TypeScript à partir de l'OpenAPI
 
 ---
 
@@ -10,15 +30,14 @@ L'API REST est documentée via **Swagger / OpenAPI 3.0** et permet la générati
 
 ### Base URL
 
-```
-Production : https://api.monitorage.example.com/api/v1
-Développement : http://localhost:3000/api/v1
-```
+| Environnement | URL |
+|---------------|-----|
+| Production | `https://api.monitorage.example.com/api/v1` |
+| Développement | `http://localhost:3000/api/v1` |
 
 ### Format des réponses
 
-Toutes les réponses suivent un format standardisé :
-
+**Réponse succès :**
 ```json
 {
   "success": true,
@@ -30,8 +49,7 @@ Toutes les réponses suivent un format standardisé :
 }
 ```
 
-En cas d'erreur :
-
+**Réponse erreur :**
 ```json
 {
   "success": false,
@@ -70,7 +88,7 @@ En cas d'erreur :
 
 Récupère le statut global de tous les endpoints monitorés.
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -99,12 +117,12 @@ Récupère le statut global de tous les endpoints monitorés.
 
 #### GET /api/v1/monitoring/endpoints/{id}
 
-Récupère les détails d'un endpoint spécifique.
+Récupère les détails d'un endpoint spécifique avec son historique.
 
 **Paramètres :**
 - `id` (path) : UUID de l'endpoint
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -133,19 +151,6 @@ Récupère les détails d'un endpoint spécifique.
 
 Force un check immédiat d'un endpoint.
 
-**Réponse :**
-```json
-{
-  "success": true,
-  "data": {
-    "status": "UP",
-    "statusCode": 200,
-    "latencyMs": 52,
-    "checkedAt": "2024-01-15T10:31:00Z"
-  }
-}
-```
-
 ---
 
 ### Administration des endpoints
@@ -158,33 +163,11 @@ Liste tous les endpoints configurés (admin only).
 - `type` (optional) : Filtrer par type (APIM, DOMAIN, TALEND)
 - `enabled` (optional) : Filtrer par statut actif
 
-**Réponse :**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "uuid",
-      "name": "API Users",
-      "type": "APIM",
-      "url": "https://api.example.com/health",
-      "checkInterval": 60,
-      "timeout": 5000,
-      "expectedStatus": 200,
-      "headers": {},
-      "enabled": true,
-      "createdAt": "2024-01-10T08:00:00Z",
-      "updatedAt": "2024-01-15T09:00:00Z"
-    }
-  ]
-}
-```
-
 #### POST /api/v1/admin/endpoints
 
 Crée un nouvel endpoint (admin only).
 
-**Body :**
+**Exemple de body :**
 ```json
 {
   "name": "API Orders",
@@ -197,18 +180,6 @@ Crée un nouvel endpoint (admin only).
     "Ocp-Apim-Subscription-Key": "***"
   },
   "enabled": true
-}
-```
-
-**Réponse (201) :**
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "name": "API Orders",
-    ...
-  }
 }
 ```
 
@@ -232,7 +203,7 @@ Teste la connectivité d'un endpoint sans le sauvegarder.
 
 Liste les jobs Talend en erreur.
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -255,9 +226,9 @@ Liste les jobs Talend en erreur.
 
 #### GET /api/v1/github/workflows
 
-Liste les workflows disponibles.
+Liste les workflows disponibles (uniquement ceux avec `workflow_dispatch`).
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -292,7 +263,7 @@ Liste les workflows disponibles.
 
 Déclenche un workflow.
 
-**Body :**
+**Exemple de body :**
 ```json
 {
   "ref": "main",
@@ -302,7 +273,7 @@ Déclenche un workflow.
 }
 ```
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -322,14 +293,14 @@ Déclenche un workflow.
 
 Purge le cache Keycloak.
 
-**Body (optionnel) :**
+**Exemple de body (optionnel) :**
 ```json
 {
   "realm": "master"
 }
 ```
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -349,51 +320,24 @@ Purge le cache Keycloak.
 
 Liste les zones Cloudflare configurées.
 
-**Réponse :**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "zone-abc123",
-      "name": "example.com",
-      "status": "active"
-    }
-  ]
-}
-```
-
 #### POST /api/v1/cloudflare/zones/{zoneId}/purge
 
 Purge le cache d'une zone Cloudflare.
 
-**Body :**
+**Exemple de body (purge complète) :**
 ```json
 {
   "purgeAll": true
 }
 ```
 
-ou
-
+**Exemple de body (purge sélective) :**
 ```json
 {
   "files": [
     "https://example.com/styles.css",
     "https://example.com/script.js"
   ]
-}
-```
-
-**Réponse :**
-```json
-{
-  "success": true,
-  "data": {
-    "purged": true,
-    "zoneId": "zone-abc123",
-    "timestamp": "2024-01-15T10:36:00Z"
-  }
 }
 ```
 
@@ -409,7 +353,7 @@ Liste les tickets GLPI de l'utilisateur.
 - `status` (optional) : Filtrer par statut (new, assigned, planned, pending, solved, closed)
 - `limit` (optional) : Nombre max de résultats (défaut: 50)
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -439,7 +383,7 @@ Liste les tickets du sprint actif.
 - `projectKey` (optional) : Clé du projet (défaut: configuré)
 - `boardId` (optional) : ID du board (défaut: configuré)
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -471,9 +415,7 @@ Liste les tickets du sprint actif.
 
 #### GET /api/v1/jira/tickets/backlog
 
-Liste les tickets du backlog (hors sprint).
-
-**Réponse :** Structure identique sans l'objet sprint.
+Liste les tickets du backlog (hors sprint). Structure identique sans l'objet sprint.
 
 ---
 
@@ -490,7 +432,7 @@ Liste les logs d'actions (admin only).
 - `to` (optional) : Date de fin
 - `limit` (optional) : Nombre max (défaut: 100)
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -519,7 +461,7 @@ Liste les logs d'actions (admin only).
 
 Récupère les informations de l'utilisateur connecté.
 
-**Réponse :**
+**Exemple de réponse :**
 ```json
 {
   "success": true,
@@ -541,290 +483,72 @@ Récupère les informations de l'utilisateur connecté.
 
 ## Spécification OpenAPI
 
-### Fichier openapi.yaml (extrait)
+### Structure attendue
 
-```yaml
-openapi: 3.0.3
-info:
-  title: App Monitorage API
-  description: API de monitoring et d'actions opérationnelles
-  version: 1.0.0
-  contact:
-    name: Équipe DevOps
-    email: devops@example.com
+La documentation OpenAPI générée doit inclure :
 
-servers:
-  - url: http://localhost:3000/api/v1
-    description: Développement local
-  - url: https://api.monitorage.example.com/api/v1
-    description: Production
+**Informations générales :**
+- Titre : App Monitorage API
+- Version : 1.0.0
+- Servers : localhost (dev), production URL
 
-tags:
-  - name: monitoring
-    description: Endpoints de monitoring
-  - name: admin
-    description: Administration (requiert rôle admin)
-  - name: talend
-    description: Intégration Talend
-  - name: github
-    description: Intégration GitHub Actions
-  - name: keycloak
-    description: Intégration Keycloak
-  - name: cloudflare
-    description: Intégration Cloudflare
-  - name: glpi
-    description: Intégration GLPI
-  - name: jira
-    description: Intégration Jira
-  - name: auth
-    description: Authentification
+**Tags (groupes d'endpoints) :**
+- monitoring : Endpoints de monitoring
+- admin : Administration (requiert rôle admin)
+- talend : Intégration Talend
+- github : Intégration GitHub Actions
+- keycloak : Intégration Keycloak
+- cloudflare : Intégration Cloudflare
+- glpi : Intégration GLPI
+- jira : Intégration Jira
+- auth : Authentification
 
-paths:
-  /monitoring/status:
-    get:
-      tags:
-        - monitoring
-      summary: Statut global du monitoring
-      operationId: getMonitoringStatus
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Succès
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MonitoringStatusResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+**Schémas de sécurité :**
+- bearerAuth : JWT Bearer token
 
-  /admin/endpoints:
-    get:
-      tags:
-        - admin
-      summary: Liste des endpoints configurés
-      operationId: getAdminEndpoints
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: type
-          in: query
-          schema:
-            $ref: '#/components/schemas/EndpointType'
-        - name: enabled
-          in: query
-          schema:
-            type: boolean
-      responses:
-        '200':
-          description: Succès
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EndpointListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+**Schémas de données principaux :**
 
-    post:
-      tags:
-        - admin
-      summary: Créer un endpoint
-      operationId: createEndpoint
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateEndpointRequest'
-      responses:
-        '201':
-          description: Endpoint créé
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EndpointResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+| Schéma | Description |
+|--------|-------------|
+| EndpointType | Enum : APIM, DOMAIN, TALEND |
+| EndpointStatus | Enum : UP, DOWN, DEGRADED, UNKNOWN |
+| Endpoint | Objet endpoint complet |
+| CreateEndpointRequest | Payload création endpoint |
+| ApiResponse | Enveloppe réponse succès |
+| ApiError | Enveloppe réponse erreur |
 
-components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-
-  schemas:
-    EndpointType:
-      type: string
-      enum:
-        - APIM
-        - DOMAIN
-        - TALEND
-
-    EndpointStatus:
-      type: string
-      enum:
-        - UP
-        - DOWN
-        - DEGRADED
-        - UNKNOWN
-
-    Endpoint:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        type:
-          $ref: '#/components/schemas/EndpointType'
-        url:
-          type: string
-          format: uri
-        status:
-          $ref: '#/components/schemas/EndpointStatus'
-        statusCode:
-          type: integer
-        latencyMs:
-          type: integer
-        lastCheck:
-          type: string
-          format: date-time
-        enabled:
-          type: boolean
-
-    CreateEndpointRequest:
-      type: object
-      required:
-        - name
-        - type
-        - url
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
-        type:
-          $ref: '#/components/schemas/EndpointType'
-        url:
-          type: string
-          format: uri
-        checkInterval:
-          type: integer
-          minimum: 10
-          default: 60
-        timeout:
-          type: integer
-          minimum: 1000
-          default: 5000
-        expectedStatus:
-          type: integer
-          default: 200
-        headers:
-          type: object
-          additionalProperties:
-            type: string
-        enabled:
-          type: boolean
-          default: true
-
-    ApiResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-        meta:
-          type: object
-          properties:
-            timestamp:
-              type: string
-              format: date-time
-            requestId:
-              type: string
-              format: uuid
-
-    ApiError:
-      type: object
-      properties:
-        success:
-          type: boolean
-          enum: [false]
-        error:
-          type: object
-          properties:
-            code:
-              type: string
-            message:
-              type: string
-            details:
-              type: array
-              items:
-                type: object
-
-  responses:
-    BadRequest:
-      description: Requête invalide
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ApiError'
-    Unauthorized:
-      description: Non authentifié
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ApiError'
-    Forbidden:
-      description: Non autorisé
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ApiError'
-    NotFound:
-      description: Ressource non trouvée
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ApiError'
-```
+**Réponses communes :**
+- BadRequest (400)
+- Unauthorized (401)
+- Forbidden (403)
+- NotFound (404)
 
 ---
 
 ## Génération du client React
 
-### Configuration
+### Stratégie
 
-Le client TypeScript est généré automatiquement à partir du fichier OpenAPI via **openapi-typescript-codegen** ou **orval**.
+Le client TypeScript frontend est **généré automatiquement** à partir du fichier OpenAPI exposé par le backend.
 
-```bash
-# Exemple avec openapi-typescript-codegen
-npx openapi-typescript-codegen \
-  --input ./swagger/openapi.yaml \
-  --output ./src/infrastructure/api/generated \
-  --client axios
-```
+**Outils recommandés :**
+- **openapi-typescript-codegen** : Génération de client Axios/Fetch
+- **orval** : Génération avec React Query intégré
+- **openapi-generator** : Génération multi-langages
 
-### Utilisation dans le frontend
+### Workflow de génération
 
-```typescript
-// src/infrastructure/api/monitoringApi.ts
-import { MonitoringService } from './generated';
+1. Le backend expose `/api-docs` avec le fichier OpenAPI
+2. Un script npm dans le frontend récupère et génère le client
+3. Le client est utilisé dans la couche `infrastructure/api`
+4. Les types sont automatiquement synchronisés avec le backend
 
-export const monitoringApi = {
-  getStatus: () => MonitoringService.getMonitoringStatus(),
-  getEndpointDetails: (id: string) => MonitoringService.getEndpointById(id),
-  forceCheck: (id: string) => MonitoringService.checkEndpoint(id),
-};
-```
+### Intégration dans le frontend
+
+Le client généré est encapsulé dans des services métier (domain services) qui ajoutent :
+- Gestion des erreurs applicatives
+- Transformation des données
+- Cache et optimistic updates si nécessaire
 
 ---
 

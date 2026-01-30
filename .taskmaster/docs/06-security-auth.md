@@ -106,27 +106,14 @@ Les rôles sont attribués via :
 1. **Azure AD App Roles** (recommandé)
 2. **Groupes Azure AD** mappés vers des rôles applicatifs
 
-```json
-// Extrait du manifeste Azure AD
-{
-  "appRoles": [
-    {
-      "id": "uuid-1",
-      "allowedMemberTypes": ["User"],
-      "displayName": "Operator",
-      "value": "operator",
-      "description": "Opérateur avec droits d'exécution d'actions"
-    },
-    {
-      "id": "uuid-2",
-      "allowedMemberTypes": ["User"],
-      "displayName": "Administrator",
-      "value": "admin",
-      "description": "Administrateur avec tous les droits"
-    }
-  ]
-}
-```
+**Configuration du manifeste Azure AD :**
+
+Les App Roles doivent être définis dans le manifeste Azure AD avec les propriétés suivantes :
+- `id` : UUID unique pour chaque rôle
+- `allowedMemberTypes` : ["User"]
+- `displayName` : Nom affiché (ex: "Operator", "Administrator")
+- `value` : Valeur technique (ex: "operator", "admin")
+- `description` : Description du rôle
 
 ---
 
@@ -134,165 +121,46 @@ Les rôles sont attribués via :
 
 ### Middleware d'authentification
 
-```typescript
-// infrastructure/middleware/authMiddleware.ts
+Le middleware d'authentification doit :
 
-import { Request, Response, NextFunction } from 'express';
-import { verify, decode } from 'jsonwebtoken';
-import jwksClient from 'jwks-rsa';
+1. **Extraire le token** : Récupérer le Bearer token depuis l'header `Authorization`
+2. **Décoder le token** : Parser le JWT pour extraire le header (kid)
+3. **Récupérer la clé publique** : Via JWKS depuis Azure AD (`https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys`)
+4. **Valider le token** :
+   - Algorithme : RS256
+   - Audience : Client ID de l'application backend
+   - Issuer : `https://login.microsoftonline.com/{tenant}/v2.0`
+5. **Extraire les informations utilisateur** :
+   - `oid` : ID utilisateur
+   - `preferred_username` : Email
+   - `name` : Nom complet
+   - `roles` : Rôles assignés (défaut: ['user'])
+6. **Injecter dans la requête** : Ajouter l'objet user à `req.user`
 
-const client = jwksClient({
-  jwksUri: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/discovery/v2.0/keys`,
-});
-
-export const authMiddleware = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        error: { code: 'UNAUTHORIZED', message: 'Token manquant' },
-      });
-    }
-
-    const token = authHeader.substring(7);
-    const decoded = decode(token, { complete: true });
-
-    if (!decoded) {
-      return res.status(401).json({
-        success: false,
-        error: { code: 'INVALID_TOKEN', message: 'Token invalide' },
-      });
-    }
-
-    const key = await client.getSigningKey(decoded.header.kid);
-    const signingKey = key.getPublicKey();
-
-    const payload = verify(token, signingKey, {
-      algorithms: ['RS256'],
-      audience: process.env.AZURE_CLIENT_ID,
-      issuer: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/v2.0`,
-    });
-
-    req.user = {
-      id: payload.oid,
-      email: payload.preferred_username,
-      name: payload.name,
-      roles: payload.roles || ['user'],
-    };
-
-    next();
-  } catch (error) {
-    return res.status(401).json({
-      success: false,
-      error: { code: 'TOKEN_VALIDATION_FAILED', message: 'Validation du token échouée' },
-    });
-  }
-};
-```
+**Librairies recommandées :**
+- `jsonwebtoken` pour la validation JWT
+- `jwks-rsa` pour la récupération des clés publiques
 
 ### Middleware d'autorisation
 
-```typescript
-// infrastructure/middleware/authorizationMiddleware.ts
+Le middleware d'autorisation doit :
 
-import { Request, Response, NextFunction } from 'express';
+1. **Définir le mapping rôle → permissions** :
+   - user : monitoring:read, tickets:read
+   - operator : monitoring:read, tickets:read, actions:execute
+   - admin : toutes les permissions
 
-type Permission =
-  | 'monitoring:read'
-  | 'tickets:read'
-  | 'actions:execute'
-  | 'admin:endpoints'
-  | 'admin:connectors'
-  | 'admin:logs';
+2. **Créer une fonction `requirePermission(...permissions)`** qui :
+   - Récupère les rôles de l'utilisateur depuis `req.user.roles`
+   - Calcule les permissions effectives selon le mapping
+   - Vérifie que toutes les permissions requises sont présentes
+   - Retourne 403 si permissions insuffisantes
 
-const rolePermissions: Record<string, Permission[]> = {
-  user: ['monitoring:read', 'tickets:read'],
-  operator: ['monitoring:read', 'tickets:read', 'actions:execute'],
-  admin: [
-    'monitoring:read',
-    'tickets:read',
-    'actions:execute',
-    'admin:endpoints',
-    'admin:connectors',
-    'admin:logs',
-  ],
-};
+### Application aux routes
 
-export const requirePermission = (...permissions: Permission[]) => {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const userRoles = req.user?.roles || [];
-
-    const userPermissions = new Set<Permission>();
-    for (const role of userRoles) {
-      const perms = rolePermissions[role] || [];
-      perms.forEach((p) => userPermissions.add(p));
-    }
-
-    const hasPermission = permissions.every((p) => userPermissions.has(p));
-
-    if (!hasPermission) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'FORBIDDEN',
-          message: 'Permissions insuffisantes',
-          required: permissions,
-        },
-      });
-    }
-
-    next();
-  };
-};
-```
-
-### Utilisation dans les routes
-
-```typescript
-// presentation/routes/admin.routes.ts
-
-import { Router } from 'express';
-import { authMiddleware } from '../middleware/authMiddleware';
-import { requirePermission } from '../middleware/authorizationMiddleware';
-import { EndpointController } from '../controllers/EndpointController';
-
-const router = Router();
-
-// Toutes les routes admin nécessitent authentification
-router.use(authMiddleware);
-
-// Routes endpoints (admin only)
-router.get(
-  '/endpoints',
-  requirePermission('admin:endpoints'),
-  EndpointController.list
-);
-
-router.post(
-  '/endpoints',
-  requirePermission('admin:endpoints'),
-  EndpointController.create
-);
-
-router.put(
-  '/endpoints/:id',
-  requirePermission('admin:endpoints'),
-  EndpointController.update
-);
-
-router.delete(
-  '/endpoints/:id',
-  requirePermission('admin:endpoints'),
-  EndpointController.delete
-);
-
-export default router;
-```
+- Toutes les routes API doivent être protégées par le middleware d'authentification
+- Les routes admin doivent en plus vérifier la permission `admin:*`
+- Les routes d'actions doivent vérifier la permission `actions:execute`
 
 ---
 
@@ -300,169 +168,44 @@ export default router;
 
 ### Configuration MSAL
 
-```typescript
-// infrastructure/auth/msalConfig.ts
+Le frontend utilise **@azure/msal-browser** pour l'authentification.
 
-import { Configuration, LogLevel } from '@azure/msal-browser';
+**Configuration requise :**
+- `clientId` : ID de l'application frontend Azure AD
+- `authority` : URL d'autorité Azure AD
+- `redirectUri` : URI de callback après login
+- `postLogoutRedirectUri` : URI après logout
+- `cacheLocation` : 'sessionStorage' (recommandé) ou 'localStorage'
 
-export const msalConfig: Configuration = {
-  auth: {
-    clientId: import.meta.env.VITE_AZURE_CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${import.meta.env.VITE_AZURE_TENANT_ID}`,
-    redirectUri: import.meta.env.VITE_REDIRECT_URI,
-    postLogoutRedirectUri: import.meta.env.VITE_POST_LOGOUT_URI,
-  },
-  cache: {
-    cacheLocation: 'sessionStorage', // ou 'localStorage' si refresh token souhaité
-    storeAuthStateInCookie: false,
-  },
-  system: {
-    loggerOptions: {
-      logLevel: LogLevel.Warning,
-    },
-  },
-};
-
-export const loginRequest = {
-  scopes: [
-    'openid',
-    'profile',
-    'email',
-    'api://app-monitorage-api/Monitoring.Read',
-    'api://app-monitorage-api/Actions.Execute',
-  ],
-};
-
-export const apiRequest = {
-  scopes: ['api://app-monitorage-api/.default'],
-};
-```
+**Scopes de login :**
+- openid, profile, email
+- Scopes API personnalisés
 
 ### Provider d'authentification
 
-```typescript
-// application/providers/AuthProvider.tsx
+Le AuthProvider doit exposer :
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import {
-  PublicClientApplication,
-  AccountInfo,
-  InteractionRequiredAuthError,
-} from '@azure/msal-browser';
-import { msalConfig, loginRequest, apiRequest } from '../../infrastructure/auth/msalConfig';
+| Propriété/Méthode | Description |
+|-------------------|-------------|
+| `user` | Compte utilisateur connecté (ou null) |
+| `isAuthenticated` | Boolean indiquant si connecté |
+| `isLoading` | Boolean pendant l'initialisation |
+| `login()` | Déclenche la redirection de login |
+| `logout()` | Déclenche la déconnexion |
+| `getAccessToken()` | Récupère un token valide (avec refresh silencieux) |
 
-interface AuthContextType {
-  user: AccountInfo | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  login: () => Promise<void>;
-  logout: () => Promise<void>;
-  getAccessToken: () => Promise<string>;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-const msalInstance = new PublicClientApplication(msalConfig);
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<AccountInfo | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const initAuth = async () => {
-      await msalInstance.initialize();
-      const response = await msalInstance.handleRedirectPromise();
-
-      if (response) {
-        setUser(response.account);
-      } else {
-        const accounts = msalInstance.getAllAccounts();
-        if (accounts.length > 0) {
-          setUser(accounts[0]);
-        }
-      }
-      setIsLoading(false);
-    };
-
-    initAuth();
-  }, []);
-
-  const login = async () => {
-    await msalInstance.loginRedirect(loginRequest);
-  };
-
-  const logout = async () => {
-    await msalInstance.logoutRedirect();
-  };
-
-  const getAccessToken = async (): Promise<string> => {
-    if (!user) throw new Error('User not authenticated');
-
-    try {
-      const response = await msalInstance.acquireTokenSilent({
-        ...apiRequest,
-        account: user,
-      });
-      return response.accessToken;
-    } catch (error) {
-      if (error instanceof InteractionRequiredAuthError) {
-        await msalInstance.acquireTokenRedirect(apiRequest);
-        throw error;
-      }
-      throw error;
-    }
-  };
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated: !!user,
-        isLoading,
-        login,
-        logout,
-        getAccessToken,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
-};
-```
+**Comportement attendu :**
+1. À l'initialisation, vérifier s'il existe une session
+2. Gérer le retour de redirection (`handleRedirectPromise`)
+3. Refresh silencieux du token si expiré
+4. Redirection interactive si refresh impossible
 
 ### Intercepteur API
 
-```typescript
-// infrastructure/api/apiClient.ts
-
-import axios from 'axios';
-
-const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
-});
-
-// L'intercepteur sera configuré après initialisation de l'auth
-export const configureApiAuth = (getAccessToken: () => Promise<string>) => {
-  apiClient.interceptors.request.use(
-    async (config) => {
-      const token = await getAccessToken();
-      config.headers.Authorization = `Bearer ${token}`;
-      return config;
-    },
-    (error) => Promise.reject(error)
-  );
-};
-
-export default apiClient;
-```
+L'intercepteur HTTP doit :
+1. Intercepter chaque requête vers l'API
+2. Appeler `getAccessToken()` pour obtenir un token valide
+3. Ajouter l'header `Authorization: Bearer {token}`
 
 ---
 
@@ -470,63 +213,25 @@ export default apiClient;
 
 ### Stockage des credentials en base
 
-Les credentials des connectors (API keys, tokens, etc.) sont chiffrés avant stockage :
+Les credentials des connectors (API keys, tokens, etc.) doivent être chiffrés avant stockage.
 
-```typescript
-// infrastructure/services/EncryptionService.ts
+**Algorithme recommandé :** AES-256-GCM
 
-import crypto from 'crypto';
+**Format de stockage :** `{iv}:{authTag}:{ciphertext}` (encodé en hexadécimal)
 
-export class EncryptionService {
-  private readonly algorithm = 'aes-256-gcm';
-  private readonly key: Buffer;
-
-  constructor() {
-    const encryptionKey = process.env.ENCRYPTION_KEY;
-    if (!encryptionKey || encryptionKey.length !== 64) {
-      throw new Error('ENCRYPTION_KEY must be 64 hex characters (256 bits)');
-    }
-    this.key = Buffer.from(encryptionKey, 'hex');
-  }
-
-  encrypt(plaintext: string): string {
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(this.algorithm, this.key, iv);
-
-    let encrypted = cipher.update(plaintext, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-
-    const authTag = cipher.getAuthTag();
-
-    // Format: iv:authTag:encrypted
-    return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
-  }
-
-  decrypt(ciphertext: string): string {
-    const [ivHex, authTagHex, encrypted] = ciphertext.split(':');
-
-    const iv = Buffer.from(ivHex, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
-
-    const decipher = crypto.createDecipheriv(this.algorithm, this.key, iv);
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return decrypted;
-  }
-}
-```
+**Principes de l'EncryptionService :**
+- Clé de chiffrement de 256 bits (64 caractères hex)
+- IV aléatoire de 16 bytes pour chaque chiffrement
+- AuthTag pour garantir l'intégrité
 
 ### Variables d'environnement
 
-| Variable | Description | Exemple |
-|----------|-------------|---------|
-| `AZURE_TENANT_ID` | ID du tenant Azure AD | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `AZURE_CLIENT_ID` | ID de l'application backend | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `ENCRYPTION_KEY` | Clé AES-256 (hex) | `64 caractères hex` |
-| `DATABASE_URL` | Connection string PostgreSQL | `postgresql://...` |
+| Variable | Description | Format |
+|----------|-------------|--------|
+| `AZURE_TENANT_ID` | ID du tenant Azure AD | UUID |
+| `AZURE_CLIENT_ID` | ID de l'application backend | UUID |
+| `ENCRYPTION_KEY` | Clé AES-256 | 64 caractères hex |
+| `DATABASE_URL` | Connection string PostgreSQL | URI PostgreSQL |
 
 ### Bonnes pratiques
 
@@ -539,44 +244,42 @@ export class EncryptionService {
 
 ## Audit et traçabilité
 
-### Logs d'actions
+### Structure des logs d'actions
 
-Toutes les actions sensibles sont loguées :
+Chaque action sensible génère un log avec :
 
-```typescript
-// domain/action/entities/ActionLog.ts
+| Champ | Type | Description |
+|-------|------|-------------|
+| id | UUID | Identifiant unique du log |
+| action | enum | Type d'action (voir ci-dessous) |
+| target | string | Cible de l'action |
+| userId | string | ID de l'utilisateur |
+| userEmail | string | Email de l'utilisateur |
+| userRoles | string[] | Rôles de l'utilisateur |
+| ipAddress | string | Adresse IP |
+| userAgent | string | User-Agent du navigateur |
+| parameters | objet | Paramètres de l'action |
+| result | enum | SUCCESS ou FAILURE |
+| errorMessage | string (opt) | Message d'erreur si échec |
+| timestamp | datetime | Horodatage |
 
-export interface ActionLog {
-  id: string;
-  action: ActionType;
-  target: string;
-  userId: string;
-  userEmail: string;
-  userRoles: string[];
-  ipAddress: string;
-  userAgent: string;
-  parameters: Record<string, unknown>;
-  result: 'SUCCESS' | 'FAILURE';
-  errorMessage?: string;
-  timestamp: Date;
-}
+### Types d'actions loguées
 
-export enum ActionType {
-  CACHE_PURGE_KEYCLOAK = 'CACHE_PURGE_KEYCLOAK',
-  CACHE_PURGE_CLOUDFLARE = 'CACHE_PURGE_CLOUDFLARE',
-  WORKFLOW_TRIGGER = 'WORKFLOW_TRIGGER',
-  ENDPOINT_CREATE = 'ENDPOINT_CREATE',
-  ENDPOINT_UPDATE = 'ENDPOINT_UPDATE',
-  ENDPOINT_DELETE = 'ENDPOINT_DELETE',
-  CONNECTOR_CONFIG_UPDATE = 'CONNECTOR_CONFIG_UPDATE',
-}
-```
+- CACHE_PURGE_KEYCLOAK
+- CACHE_PURGE_CLOUDFLARE
+- WORKFLOW_TRIGGER
+- ENDPOINT_CREATE
+- ENDPOINT_UPDATE
+- ENDPOINT_DELETE
+- CONNECTOR_CONFIG_UPDATE
 
 ### Rétention des logs
 
-- **Logs d'actions** : 90 jours minimum
-- **Logs d'authentification** : 30 jours
-- **Logs techniques** : 7 jours
+| Type de log | Durée de rétention |
+|-------------|-------------------|
+| Logs d'actions | 90 jours minimum |
+| Logs d'authentification | 30 jours |
+| Logs techniques | 7 jours |
 
 ---
 
@@ -584,55 +287,41 @@ export enum ActionType {
 
 ### Headers HTTP
 
-```typescript
-// presentation/middleware/securityMiddleware.ts
+Utiliser **helmet** pour configurer les headers de sécurité :
 
-import helmet from 'helmet';
-
-app.use(helmet());
-app.use(helmet.contentSecurityPolicy({
-  directives: {
-    defaultSrc: ["'self'"],
-    scriptSrc: ["'self'"],
-    styleSrc: ["'self'", "'unsafe-inline'"],
-    imgSrc: ["'self'", 'data:', 'https:'],
-    connectSrc: ["'self'", 'https://login.microsoftonline.com'],
-  },
-}));
-```
+| Header | Configuration |
+|--------|---------------|
+| Strict-Transport-Security | max-age=31536000; includeSubDomains |
+| X-Content-Type-Options | nosniff |
+| X-Frame-Options | DENY |
+| Content-Security-Policy | default-src 'self'; connect-src 'self' https://login.microsoftonline.com |
+| X-XSS-Protection | 1; mode=block |
 
 ### Rate limiting
 
-```typescript
-import rateLimit from 'express-rate-limit';
-
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requêtes par fenêtre
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-app.use('/api/', apiLimiter);
-```
+| Endpoint | Limite |
+|----------|--------|
+| API générale | 100 requêtes / 15 minutes / utilisateur |
+| Actions (purge, workflow) | 10 requêtes / minute / utilisateur |
+| Authentification | 5 requêtes / minute / IP |
 
 ### Validation des entrées
 
-Utilisation de **Zod** ou **Joi** pour la validation :
+Utiliser une librairie de validation (Zod, Joi, class-validator) pour valider :
+- Format des données entrantes
+- Contraintes métier (longueur, format URL, etc.)
+- Types de données
 
-```typescript
-import { z } from 'zod';
-
-const createEndpointSchema = z.object({
-  name: z.string().min(1).max(100),
-  type: z.enum(['APIM', 'DOMAIN', 'TALEND']),
-  url: z.string().url(),
-  checkInterval: z.number().int().min(10).optional(),
-  timeout: z.number().int().min(1000).optional(),
-  expectedStatus: z.number().int().min(100).max(599).optional(),
-  enabled: z.boolean().optional(),
-});
-```
+**Règles de validation pour CreateEndpoint :**
+| Champ | Règles |
+|-------|--------|
+| name | string, min 1, max 100 |
+| type | enum (APIM, DOMAIN, TALEND) |
+| url | string, format URL valide |
+| checkInterval | integer, min 10 (optionnel) |
+| timeout | integer, min 1000 (optionnel) |
+| expectedStatus | integer, 100-599 (optionnel) |
+| enabled | boolean (optionnel) |
 
 ---
 

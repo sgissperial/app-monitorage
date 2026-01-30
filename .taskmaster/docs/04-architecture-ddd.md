@@ -2,7 +2,7 @@
 
 ## Vue d'ensemble
 
-L'application suit les principes du **Domain-Driven Design (DDD)** avec une architecture en couches distinctes, tant côté backend que frontend.
+L'application suit les principes du **Domain-Driven Design (DDD)** avec une architecture en couches distinctes, tant côté backend que frontend. Le backend utilise **Node.js 22** avec **TypeScript** et **Express**.
 
 ---
 
@@ -11,13 +11,13 @@ L'application suit les principes du **Domain-Driven Design (DDD)** avec une arch
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         FRONTEND                                │
-│                   (React + Vite + MUI)                         │
+│              (React + Vite + TypeScript + MUI)                 │
 ├─────────────────────────────────────────────────────────────────┤
 │                         API REST                                │
-│                   (Swagger / OpenAPI)                          │
+│              (Swagger / OpenAPI généré depuis le code)         │
 ├─────────────────────────────────────────────────────────────────┤
 │                         BACKEND                                 │
-│                      (Node.js 22)                              │
+│              (Node.js 22 + TypeScript + Express)               │
 ├─────────────────────────────────────────────────────────────────┤
 │                       PostgreSQL                               │
 └─────────────────────────────────────────────────────────────────┘
@@ -36,20 +36,20 @@ L'application suit les principes du **Domain-Driven Design (DDD)** avec une arch
 ```
 app-monitorage/
 ├── packages/
-│   ├── backend/                 # API Node.js
+│   ├── backend/                 # API Node.js + Express + TypeScript
 │   │   ├── src/
 │   │   │   ├── domain/          # Couche domaine
 │   │   │   ├── application/     # Couche application (use cases)
 │   │   │   ├── infrastructure/  # Couche infrastructure
-│   │   │   └── presentation/    # Couche présentation (API)
+│   │   │   └── presentation/    # Couche présentation (API Express)
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
-│   ├── frontend/                # Application React
+│   ├── frontend/                # Application React + TypeScript
 │   │   ├── src/
 │   │   │   ├── domain/          # Logique métier frontend
 │   │   │   ├── application/     # Services et état
-│   │   │   ├── infrastructure/  # API client, storage
+│   │   │   ├── infrastructure/  # API client (généré), storage
 │   │   │   └── presentation/    # Composants UI
 │   │   ├── package.json
 │   │   └── vite.config.ts
@@ -94,260 +94,137 @@ app-monitorage/
 backend/src/
 ├── domain/
 │   ├── monitoring/
-│   │   ├── entities/
-│   │   │   ├── Endpoint.ts
-│   │   │   ├── HealthStatus.ts
-│   │   │   └── MonitoringResult.ts
-│   │   ├── value-objects/
-│   │   │   ├── EndpointUrl.ts
-│   │   │   ├── EndpointType.ts
-│   │   │   └── StatusCode.ts
-│   │   ├── repositories/
-│   │   │   └── IEndpointRepository.ts
-│   │   └── services/
-│   │       └── HealthCheckService.ts
+│   │   ├── entities/            # Endpoint, HealthStatus, MonitoringResult
+│   │   ├── value-objects/       # EndpointUrl, EndpointType, StatusCode
+│   │   ├── repositories/        # IEndpointRepository (interface)
+│   │   └── services/            # HealthCheckService
 │   │
 │   ├── connector/
-│   │   ├── entities/
-│   │   │   └── Connector.ts
-│   │   ├── value-objects/
-│   │   │   ├── ConnectorType.ts
-│   │   │   └── ConnectorCredentials.ts
-│   │   ├── interfaces/
-│   │   │   └── IConnector.ts
-│   │   └── repositories/
-│   │       └── IConnectorRepository.ts
+│   │   ├── entities/            # Connector
+│   │   ├── value-objects/       # ConnectorType, ConnectorCredentials
+│   │   ├── interfaces/          # IConnector (interface commune)
+│   │   └── repositories/        # IConnectorRepository
 │   │
 │   ├── ticket/
-│   │   ├── entities/
-│   │   │   └── Ticket.ts
-│   │   ├── value-objects/
-│   │   │   ├── TicketStatus.ts
-│   │   │   └── TicketPriority.ts
-│   │   └── repositories/
-│   │       └── ITicketRepository.ts
+│   │   ├── entities/            # Ticket
+│   │   ├── value-objects/       # TicketStatus, TicketPriority
+│   │   └── repositories/        # ITicketRepository
 │   │
 │   └── action/
-│       ├── entities/
-│       │   ├── Action.ts
-│       │   └── ActionLog.ts
-│       ├── value-objects/
-│       │   ├── ActionType.ts
-│       │   └── ActionResult.ts
-│       └── repositories/
-│           └── IActionLogRepository.ts
+│       ├── entities/            # Action, ActionLog
+│       ├── value-objects/       # ActionType, ActionResult
+│       └── repositories/        # IActionLogRepository
 │
 ├── application/
 │   ├── monitoring/
-│   │   ├── commands/
-│   │   │   ├── CreateEndpointCommand.ts
-│   │   │   ├── UpdateEndpointCommand.ts
-│   │   │   └── DeleteEndpointCommand.ts
-│   │   ├── queries/
-│   │   │   ├── GetAllEndpointsQuery.ts
-│   │   │   ├── GetEndpointHealthQuery.ts
-│   │   │   └── GetMonitoringDashboardQuery.ts
-│   │   └── handlers/
-│   │       ├── CreateEndpointHandler.ts
-│   │       ├── UpdateEndpointHandler.ts
-│   │       └── ...
+│   │   ├── commands/            # CreateEndpoint, UpdateEndpoint, DeleteEndpoint
+│   │   ├── queries/             # GetAllEndpoints, GetEndpointHealth, GetMonitoringDashboard
+│   │   └── handlers/            # Handlers pour chaque command/query
 │   │
 │   ├── connector/
-│   │   ├── commands/
-│   │   │   └── ExecuteConnectorActionCommand.ts
-│   │   ├── queries/
-│   │   │   ├── GetConnectorStatusQuery.ts
-│   │   │   └── ListConnectorResourcesQuery.ts
+│   │   ├── commands/            # ExecuteConnectorAction
+│   │   ├── queries/             # GetConnectorStatus, ListConnectorResources
 │   │   └── handlers/
-│   │       └── ...
 │   │
 │   ├── ticket/
-│   │   └── queries/
-│   │       ├── GetJiraTicketsQuery.ts
-│   │       └── GetGlpiTicketsQuery.ts
+│   │   └── queries/             # GetJiraTickets, GetGlpiTickets
 │   │
 │   └── action/
-│       ├── commands/
-│       │   ├── PurgeCacheCommand.ts
-│       │   └── TriggerWorkflowCommand.ts
+│       ├── commands/            # PurgeCache, TriggerWorkflow
 │       └── handlers/
-│           └── ...
 │
 ├── infrastructure/
 │   ├── persistence/
-│   │   ├── repositories/
-│   │   │   ├── PostgresEndpointRepository.ts
-│   │   │   ├── PostgresConnectorRepository.ts
-│   │   │   └── PostgresActionLogRepository.ts
-│   │   ├── entities/
-│   │   │   ├── EndpointEntity.ts
-│   │   │   ├── ConnectorEntity.ts
-│   │   │   └── ActionLogEntity.ts
+│   │   ├── repositories/        # Implémentations PostgreSQL
+│   │   ├── entities/            # Entités ORM/mapping
 │   │   └── migrations/
-│   │       └── ...
 │   │
 │   ├── connectors/
-│   │   ├── base/
-│   │   │   ├── BaseConnector.ts
-│   │   │   └── ConnectorFactory.ts
-│   │   ├── TalendConnector.ts
-│   │   ├── ApimConnector.ts
-│   │   ├── GitHubConnector.ts
-│   │   ├── KeycloakConnector.ts
-│   │   ├── DomainHealthConnector.ts
-│   │   ├── CloudflareConnector.ts
-│   │   ├── GlpiConnector.ts
-│   │   └── JiraConnector.ts
+│   │   ├── base/                # BaseConnector, ConnectorFactory
+│   │   ├── TalendConnector
+│   │   ├── ApimConnector
+│   │   ├── GitHubConnector
+│   │   ├── KeycloakConnector
+│   │   ├── DomainHealthConnector
+│   │   ├── CloudflareConnector
+│   │   ├── GlpiConnector
+│   │   └── JiraConnector
 │   │
-│   ├── config/
-│   │   ├── database.ts
-│   │   └── environment.ts
+│   ├── config/                  # Configuration database, environment
 │   │
-│   └── services/
-│       ├── EncryptionService.ts
-│       └── SchedulerService.ts
+│   └── services/                # EncryptionService, SchedulerService
 │
 └── presentation/
-    ├── controllers/
-    │   ├── MonitoringController.ts
-    │   ├── EndpointController.ts
-    │   ├── ConnectorController.ts
-    │   ├── TicketController.ts
-    │   └── ActionController.ts
-    │
-    ├── routes/
-    │   ├── index.ts
-    │   ├── monitoring.routes.ts
-    │   ├── endpoint.routes.ts
-    │   ├── connector.routes.ts
-    │   ├── ticket.routes.ts
-    │   └── action.routes.ts
-    │
-    ├── middleware/
-    │   ├── authMiddleware.ts
-    │   ├── errorMiddleware.ts
-    │   └── validationMiddleware.ts
-    │
-    ├── dtos/
-    │   ├── EndpointDto.ts
-    │   ├── MonitoringResultDto.ts
-    │   ├── TicketDto.ts
-    │   └── ActionDto.ts
-    │
-    └── swagger/
-        └── openapi.yaml
+    ├── controllers/             # MonitoringController, EndpointController, etc.
+    ├── routes/                  # Routes Express avec décorateurs Swagger
+    ├── middleware/              # Auth, Error, Validation
+    └── dtos/                    # Data Transfer Objects avec annotations Swagger
 ```
 
 ---
 
 ## Interface Connector (Pattern Strategy)
 
-### Définition de l'interface
+### Spécification de l'interface IConnector
 
-```typescript
-// domain/connector/interfaces/IConnector.ts
+Chaque connector doit implémenter l'interface commune suivante :
 
-export interface IConnector {
-  /**
-   * Vérifie l'état de santé du système externe
-   */
-  checkHealth(): Promise<HealthCheckResult>;
+| Méthode | Description | Retour |
+|---------|-------------|--------|
+| `checkHealth()` | Vérifie l'état de santé du système externe | HealthCheckResult |
+| `listResources(options?)` | Liste les ressources disponibles (jobs, tickets, workflows...) | Resource[] |
+| `executeAction(action)` | Exécute une action spécifique | ActionResult |
+| `getType()` | Retourne le type du connector | ConnectorType |
+| `isConfigured()` | Vérifie si le connector est correctement configuré | boolean |
 
-  /**
-   * Liste les ressources disponibles (jobs, tickets, workflows...)
-   */
-  listResources(options?: ListResourcesOptions): Promise<Resource[]>;
+### Types de données
 
-  /**
-   * Exécute une action spécifique
-   */
-  executeAction(action: ConnectorAction): Promise<ActionResult>;
+**HealthCheckResult :**
+| Champ | Type | Description |
+|-------|------|-------------|
+| status | 'UP' \| 'DOWN' \| 'DEGRADED' | État du service |
+| latencyMs | number (optionnel) | Temps de réponse en ms |
+| statusCode | number (optionnel) | Code HTTP de la réponse |
+| message | string (optionnel) | Message descriptif |
+| timestamp | Date | Horodatage du check |
 
-  /**
-   * Retourne le type du connector
-   */
-  getType(): ConnectorType;
+**Resource :**
+| Champ | Type | Description |
+|-------|------|-------------|
+| id | string | Identifiant unique |
+| name | string | Nom de la ressource |
+| type | string | Type de ressource |
+| metadata | objet | Métadonnées spécifiques |
 
-  /**
-   * Vérifie si le connector est correctement configuré
-   */
-  isConfigured(): boolean;
-}
+**ActionResult :**
+| Champ | Type | Description |
+|-------|------|-------------|
+| success | boolean | Succès de l'action |
+| message | string | Message descriptif |
+| data | objet (optionnel) | Données retournées |
+| timestamp | Date | Horodatage |
 
-export interface HealthCheckResult {
-  status: 'UP' | 'DOWN' | 'DEGRADED';
-  latencyMs?: number;
-  statusCode?: number;
-  message?: string;
-  timestamp: Date;
-}
+**ConnectorType (enum) :**
+- TALEND
+- APIM
+- GITHUB
+- KEYCLOAK
+- DOMAIN_HEALTH
+- CLOUDFLARE
+- GLPI
+- JIRA
 
-export interface Resource {
-  id: string;
-  name: string;
-  type: string;
-  metadata: Record<string, unknown>;
-}
+### Classe de base BaseConnector
 
-export interface ConnectorAction {
-  type: string;
-  parameters: Record<string, unknown>;
-}
+Tous les connectors doivent hériter d'une classe abstraite `BaseConnector` qui fournit :
 
-export interface ActionResult {
-  success: boolean;
-  message: string;
-  data?: Record<string, unknown>;
-  timestamp: Date;
-}
+- Injection de la configuration (ConnectorConfig)
+- Client HTTP configuré avec timeout et retries
+- Logger dédié
+- Gestion centralisée des erreurs
+- Méthode `isConfigured()` par défaut
 
-export enum ConnectorType {
-  TALEND = 'TALEND',
-  APIM = 'APIM',
-  GITHUB = 'GITHUB',
-  KEYCLOAK = 'KEYCLOAK',
-  DOMAIN_HEALTH = 'DOMAIN_HEALTH',
-  CLOUDFLARE = 'CLOUDFLARE',
-  GLPI = 'GLPI',
-  JIRA = 'JIRA',
-}
-```
-
-### Classe de base abstraite
-
-```typescript
-// infrastructure/connectors/base/BaseConnector.ts
-
-export abstract class BaseConnector implements IConnector {
-  protected readonly config: ConnectorConfig;
-  protected readonly httpClient: HttpClient;
-  protected readonly logger: Logger;
-
-  constructor(config: ConnectorConfig) {
-    this.config = config;
-    this.httpClient = new HttpClient({
-      baseUrl: config.baseUrl,
-      timeout: config.timeout ?? 5000,
-      retries: config.retries ?? 3,
-    });
-    this.logger = new Logger(this.getType());
-  }
-
-  abstract checkHealth(): Promise<HealthCheckResult>;
-  abstract listResources(options?: ListResourcesOptions): Promise<Resource[]>;
-  abstract executeAction(action: ConnectorAction): Promise<ActionResult>;
-  abstract getType(): ConnectorType;
-
-  isConfigured(): boolean {
-    return !!(this.config.baseUrl && this.config.credentials);
-  }
-
-  protected async handleError(error: Error): Promise<never> {
-    this.logger.error('Connector error', { error });
-    throw new ConnectorError(this.getType(), error.message);
-  }
-}
-```
+Chaque connector concret implémente les méthodes abstraites spécifiques à son système externe.
 
 ---
 
@@ -359,92 +236,42 @@ export abstract class BaseConnector implements IConnector {
 frontend/src/
 ├── domain/
 │   ├── monitoring/
-│   │   ├── models/
-│   │   │   ├── Endpoint.ts
-│   │   │   └── MonitoringStatus.ts
-│   │   └── services/
-│   │       └── MonitoringService.ts
+│   │   ├── models/              # Endpoint, MonitoringStatus
+│   │   └── services/            # MonitoringService
 │   │
 │   ├── ticket/
-│   │   ├── models/
-│   │   │   └── Ticket.ts
-│   │   └── services/
-│   │       └── TicketService.ts
+│   │   ├── models/              # Ticket
+│   │   └── services/            # TicketService
 │   │
 │   └── action/
-│       ├── models/
-│       │   └── Action.ts
-│       └── services/
-│           └── ActionService.ts
+│       ├── models/              # Action
+│       └── services/            # ActionService
 │
 ├── application/
-│   ├── hooks/
-│   │   ├── useMonitoring.ts
-│   │   ├── useTickets.ts
-│   │   ├── useActions.ts
-│   │   └── useAuth.ts
-│   │
-│   ├── stores/
-│   │   ├── monitoringStore.ts
-│   │   ├── ticketStore.ts
-│   │   └── authStore.ts
-│   │
-│   └── providers/
-│       ├── AuthProvider.tsx
-│       └── NotificationProvider.tsx
+│   ├── hooks/                   # useMonitoring, useTickets, useActions, useAuth
+│   ├── stores/                  # monitoringStore, ticketStore, authStore
+│   └── providers/               # AuthProvider, NotificationProvider
 │
 ├── infrastructure/
 │   ├── api/
-│   │   ├── apiClient.ts          # Client généré depuis Swagger
-│   │   ├── monitoringApi.ts
-│   │   ├── ticketApi.ts
-│   │   └── actionApi.ts
+│   │   ├── apiClient            # Client généré depuis Swagger/OpenAPI
+│   │   ├── monitoringApi
+│   │   ├── ticketApi
+│   │   └── actionApi
 │   │
-│   └── storage/
-│       └── localStorage.ts
+│   └── storage/                 # localStorage utilities
 │
 └── presentation/
     ├── components/
-    │   ├── common/
-    │   │   ├── Toolbar.tsx
-    │   │   ├── StatusCard.tsx
-    │   │   ├── Toast.tsx
-    │   │   ├── ConfirmDialog.tsx
-    │   │   └── LoadingSpinner.tsx
-    │   │
-    │   ├── monitoring/
-    │   │   ├── MonitoringDashboard.tsx
-    │   │   ├── EndpointCard.tsx
-    │   │   └── EndpointDetails.tsx
-    │   │
-    │   ├── tickets/
-    │   │   ├── TicketList.tsx
-    │   │   ├── TicketCard.tsx
-    │   │   └── TicketFilters.tsx
-    │   │
-    │   ├── actions/
-    │   │   ├── CacheActions.tsx
-    │   │   ├── WorkflowList.tsx
-    │   │   └── WorkflowTrigger.tsx
-    │   │
-    │   └── admin/
-    │       ├── EndpointAdmin.tsx
-    │       ├── EndpointForm.tsx
-    │       └── ConnectorConfig.tsx
+    │   ├── common/              # Toolbar, StatusCard, Toast, ConfirmDialog, LoadingSpinner
+    │   ├── monitoring/          # MonitoringDashboard, EndpointCard, EndpointDetails
+    │   ├── tickets/             # TicketList, TicketCard, TicketFilters
+    │   ├── actions/             # CacheActions, WorkflowList, WorkflowTrigger
+    │   └── admin/               # EndpointAdmin, EndpointForm, ConnectorConfig
     │
-    ├── pages/
-    │   ├── DashboardPage.tsx
-    │   ├── MonitoringPage.tsx
-    │   ├── TicketsPage.tsx
-    │   ├── CachesPage.tsx
-    │   ├── GitHubActionsPage.tsx
-    │   └── AdminPage.tsx
-    │
-    ├── layouts/
-    │   └── MainLayout.tsx
-    │
-    └── routes/
-        └── AppRoutes.tsx
+    ├── pages/                   # DashboardPage, MonitoringPage, TicketsPage, etc.
+    ├── layouts/                 # MainLayout
+    └── routes/                  # AppRoutes
 ```
 
 ---
@@ -550,6 +377,17 @@ frontend/src/
          ▼
 10. Agrégation des résultats et retour
 ```
+
+---
+
+## Génération du client API
+
+Le frontend utilise un **client TypeScript généré automatiquement** à partir de la documentation Swagger/OpenAPI exposée par le backend.
+
+**Approche recommandée :**
+- Le backend génère la documentation OpenAPI à partir des décorateurs/annotations dans le code (ex: tsoa, routing-controllers, swagger-jsdoc)
+- Un script de build génère le client TypeScript pour le frontend (ex: openapi-typescript-codegen, orval)
+- Le client généré est utilisé dans la couche `infrastructure/api` du frontend
 
 ---
 

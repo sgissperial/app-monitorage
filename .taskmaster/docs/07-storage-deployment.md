@@ -42,335 +42,192 @@ Ce document décrit le schéma de base de données PostgreSQL, la configuration 
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Script de migration initial
+### Tables et colonnes
 
-```sql
--- migrations/001_initial_schema.sql
+#### Table : endpoints
 
--- Extension pour UUID
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+Stocke les endpoints à monitorer.
 
--- Enum pour les types d'endpoints
-CREATE TYPE endpoint_type AS ENUM ('APIM', 'DOMAIN', 'TALEND');
+| Colonne | Type | Contraintes | Description |
+|---------|------|-------------|-------------|
+| id | UUID | PK, auto-generated | Identifiant unique |
+| name | VARCHAR(100) | NOT NULL | Nom d'affichage |
+| type | ENUM | NOT NULL | Type : APIM, DOMAIN, TALEND |
+| url | VARCHAR(500) | NOT NULL | URL du healthcheck |
+| check_interval | INTEGER | NOT NULL, default 60 | Intervalle en secondes |
+| timeout | INTEGER | NOT NULL, default 5000 | Timeout en ms |
+| expected_status | INTEGER | NOT NULL, default 200 | Code HTTP attendu |
+| headers | JSONB | default '{}' | Headers personnalisés |
+| enabled | BOOLEAN | NOT NULL, default true | Actif/inactif |
+| created_at | TIMESTAMP WITH TZ | NOT NULL, auto | Date de création |
+| updated_at | TIMESTAMP WITH TZ | NOT NULL, auto | Date de modification |
 
--- Enum pour les types de connectors
-CREATE TYPE connector_type AS ENUM (
-  'TALEND', 'APIM', 'GITHUB', 'KEYCLOAK',
-  'DOMAIN_HEALTH', 'CLOUDFLARE', 'GLPI', 'JIRA'
-);
+**Index :** type, enabled
 
--- Enum pour les statuts de santé
-CREATE TYPE health_status AS ENUM ('UP', 'DOWN', 'DEGRADED', 'UNKNOWN');
+#### Table : connectors
 
--- Enum pour les résultats d'actions
-CREATE TYPE action_result AS ENUM ('SUCCESS', 'FAILURE');
+Configuration des connectors externes.
 
--- Table des endpoints monitorés
-CREATE TABLE endpoints (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name VARCHAR(100) NOT NULL,
-  type endpoint_type NOT NULL,
-  url VARCHAR(500) NOT NULL,
-  check_interval INTEGER NOT NULL DEFAULT 60,
-  timeout INTEGER NOT NULL DEFAULT 5000,
-  expected_status INTEGER NOT NULL DEFAULT 200,
-  headers JSONB DEFAULT '{}',
-  enabled BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
+| Colonne | Type | Contraintes | Description |
+|---------|------|-------------|-------------|
+| id | UUID | PK, auto-generated | Identifiant unique |
+| type | ENUM | NOT NULL, UNIQUE | Type de connector |
+| base_url | VARCHAR(500) | nullable | URL de base de l'API |
+| credentials | TEXT | nullable, chiffré | Credentials (AES-256) |
+| options | JSONB | default '{}' | Options spécifiques |
+| enabled | BOOLEAN | NOT NULL, default true | Actif/inactif |
+| created_at | TIMESTAMP WITH TZ | NOT NULL, auto | Date de création |
+| updated_at | TIMESTAMP WITH TZ | NOT NULL, auto | Date de modification |
 
--- Index sur les endpoints
-CREATE INDEX idx_endpoints_type ON endpoints(type);
-CREATE INDEX idx_endpoints_enabled ON endpoints(enabled);
+**ConnectorType enum :** TALEND, APIM, GITHUB, KEYCLOAK, DOMAIN_HEALTH, CLOUDFLARE, GLPI, JIRA
 
--- Table des connectors
-CREATE TABLE connectors (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  type connector_type NOT NULL UNIQUE,
-  base_url VARCHAR(500),
-  credentials TEXT, -- Chiffré (AES-256)
-  options JSONB DEFAULT '{}',
-  enabled BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
+**Index :** type, enabled
 
--- Index sur les connectors
-CREATE INDEX idx_connectors_type ON connectors(type);
-CREATE INDEX idx_connectors_enabled ON connectors(enabled);
+#### Table : health_history
 
--- Table de l'historique des checks
-CREATE TABLE health_history (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  endpoint_id UUID NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
-  status health_status NOT NULL,
-  status_code INTEGER,
-  latency_ms INTEGER,
-  error_message TEXT,
-  checked_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
+Historique des checks de santé.
 
--- Index sur l'historique
-CREATE INDEX idx_health_history_endpoint_id ON health_history(endpoint_id);
-CREATE INDEX idx_health_history_checked_at ON health_history(checked_at DESC);
+| Colonne | Type | Contraintes | Description |
+|---------|------|-------------|-------------|
+| id | UUID | PK, auto-generated | Identifiant unique |
+| endpoint_id | UUID | FK → endpoints(id), CASCADE | Endpoint associé |
+| status | ENUM | NOT NULL | UP, DOWN, DEGRADED, UNKNOWN |
+| status_code | INTEGER | nullable | Code HTTP de la réponse |
+| latency_ms | INTEGER | nullable | Temps de réponse |
+| error_message | TEXT | nullable | Message d'erreur |
+| checked_at | TIMESTAMP WITH TZ | NOT NULL, auto | Horodatage du check |
 
--- Partition par mois pour l'historique (optionnel, pour gros volumes)
--- CREATE TABLE health_history_2024_01 PARTITION OF health_history
---   FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');
+**Index :** endpoint_id, checked_at DESC
 
--- Table des logs d'actions
-CREATE TABLE action_logs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  action VARCHAR(50) NOT NULL,
-  target VARCHAR(100) NOT NULL,
-  user_id VARCHAR(100) NOT NULL,
-  user_email VARCHAR(255) NOT NULL,
-  user_roles JSONB DEFAULT '[]',
-  ip_address VARCHAR(45),
-  user_agent TEXT,
-  parameters JSONB DEFAULT '{}',
-  result action_result NOT NULL,
-  error_message TEXT,
-  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-);
+**Note :** Partitionnement par mois recommandé pour gros volumes.
 
--- Index sur les logs
-CREATE INDEX idx_action_logs_user_id ON action_logs(user_id);
-CREATE INDEX idx_action_logs_action ON action_logs(action);
-CREATE INDEX idx_action_logs_created_at ON action_logs(created_at DESC);
+#### Table : action_logs
 
--- Trigger pour mise à jour automatique de updated_at
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ language 'plpgsql';
+Logs d'audit des actions utilisateur.
 
-CREATE TRIGGER update_endpoints_updated_at
-  BEFORE UPDATE ON endpoints
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+| Colonne | Type | Contraintes | Description |
+|---------|------|-------------|-------------|
+| id | UUID | PK, auto-generated | Identifiant unique |
+| action | VARCHAR(50) | NOT NULL | Type d'action |
+| target | VARCHAR(100) | NOT NULL | Cible de l'action |
+| user_id | VARCHAR(100) | NOT NULL | ID utilisateur Azure AD |
+| user_email | VARCHAR(255) | NOT NULL | Email utilisateur |
+| user_roles | JSONB | default '[]' | Rôles de l'utilisateur |
+| ip_address | VARCHAR(45) | nullable | Adresse IP |
+| user_agent | TEXT | nullable | User-Agent |
+| parameters | JSONB | default '{}' | Paramètres de l'action |
+| result | ENUM | NOT NULL | SUCCESS, FAILURE |
+| error_message | TEXT | nullable | Message d'erreur |
+| created_at | TIMESTAMP WITH TZ | NOT NULL, auto | Horodatage |
 
-CREATE TRIGGER update_connectors_updated_at
-  BEFORE UPDATE ON connectors
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+**Index :** user_id, action, created_at DESC
 
--- Vue pour le statut actuel des endpoints
-CREATE VIEW current_endpoint_status AS
-SELECT DISTINCT ON (e.id)
-  e.id,
-  e.name,
-  e.type,
-  e.url,
-  e.enabled,
-  h.status,
-  h.status_code,
-  h.latency_ms,
-  h.checked_at AS last_check
-FROM endpoints e
-LEFT JOIN health_history h ON e.id = h.endpoint_id
-ORDER BY e.id, h.checked_at DESC;
-```
+### Mécanismes automatiques
+
+**Triggers :**
+- `updated_at` : Mise à jour automatique sur UPDATE pour endpoints et connectors
+
+**Vue :** `current_endpoint_status`
+- Agrège endpoints + dernier health_history
+- Retourne : id, name, type, url, enabled, status, status_code, latency_ms, last_check
 
 ### Données initiales
 
-```sql
--- migrations/002_seed_connectors.sql
-
--- Insertion des connectors avec configuration par défaut
-INSERT INTO connectors (type, base_url, enabled) VALUES
-  ('TALEND', NULL, false),
-  ('APIM', NULL, false),
-  ('GITHUB', 'https://api.github.com', false),
-  ('KEYCLOAK', NULL, false),
-  ('DOMAIN_HEALTH', NULL, true),
-  ('CLOUDFLARE', 'https://api.cloudflare.com/client/v4', false),
-  ('GLPI', NULL, false),
-  ('JIRA', NULL, false);
-```
+Les connectors doivent être pré-insérés avec leur type et une configuration par défaut :
+- Tous les types de connectors présents
+- `enabled = false` par défaut (sauf DOMAIN_HEALTH)
+- URLs de base prédéfinies pour GitHub et Cloudflare
 
 ---
 
 ## Environnement de développement local
 
-### docker-compose.yml
+### Architecture Docker Compose
 
-```yaml
-version: '3.8'
+**Services requis :**
 
-services:
-  # Base de données PostgreSQL
-  postgres:
-    image: postgres:16-alpine
-    container_name: monitorage-db
-    environment:
-      POSTGRES_USER: ${DB_USER:-monitorage}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-monitorage_dev}
-      POSTGRES_DB: ${DB_NAME:-monitorage}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./packages/backend/migrations:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-monitorage}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+| Service | Image | Port | Description |
+|---------|-------|------|-------------|
+| postgres | postgres:16-alpine | 5432 | Base de données |
+| backend | Custom (Dockerfile.dev) | 3000 | API Node.js + Express |
+| frontend | Custom (Dockerfile.dev) | 5173 | React + Vite |
 
-  # Backend Node.js
-  backend:
-    build:
-      context: ./packages/backend
-      dockerfile: Dockerfile.dev
-    container_name: monitorage-backend
-    environment:
-      NODE_ENV: development
-      PORT: 3000
-      DATABASE_URL: postgresql://${DB_USER:-monitorage}:${DB_PASSWORD:-monitorage_dev}@postgres:5432/${DB_NAME:-monitorage}
-      AZURE_TENANT_ID: ${AZURE_TENANT_ID}
-      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      # Connectors (optionnel en dev)
-      TALEND_API_KEY: ${TALEND_API_KEY:-}
-      GITHUB_PAT: ${GITHUB_PAT:-}
-      KEYCLOAK_URL: ${KEYCLOAK_URL:-}
-      CLOUDFLARE_API_KEY: ${CLOUDFLARE_API_KEY:-}
-      GLPI_API_KEY: ${GLPI_API_KEY:-}
-      JIRA_API_KEY: ${JIRA_API_KEY:-}
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./packages/backend/src:/app/src
-      - ./packages/shared:/app/packages/shared
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: npm run dev
+### Configuration PostgreSQL (dev)
 
-  # Frontend React
-  frontend:
-    build:
-      context: ./packages/frontend
-      dockerfile: Dockerfile.dev
-    container_name: monitorage-frontend
-    environment:
-      VITE_API_BASE_URL: http://localhost:3000/api/v1
-      VITE_AZURE_TENANT_ID: ${AZURE_TENANT_ID}
-      VITE_AZURE_CLIENT_ID: ${AZURE_CLIENT_ID_FRONTEND}
-      VITE_REDIRECT_URI: http://localhost:5173/callback
-      VITE_POST_LOGOUT_URI: http://localhost:5173
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./packages/frontend/src:/app/src
-      - ./packages/shared:/app/packages/shared
-    depends_on:
-      - backend
-    command: npm run dev -- --host
+| Variable | Valeur par défaut |
+|----------|-------------------|
+| POSTGRES_USER | monitorage |
+| POSTGRES_PASSWORD | monitorage_dev |
+| POSTGRES_DB | monitorage |
 
-volumes:
-  postgres_data:
+**Volumes :**
+- Persistance des données PostgreSQL
+- Montage des migrations pour initialisation
 
-networks:
-  default:
-    name: monitorage-network
-```
+**Healthcheck :**
+- Commande : `pg_isready`
+- Intervalle : 10s, timeout : 5s, retries : 5
+
+### Configuration Backend (dev)
+
+**Variables d'environnement :**
+| Variable | Description |
+|----------|-------------|
+| NODE_ENV | development |
+| PORT | 3000 |
+| DATABASE_URL | Connection string PostgreSQL |
+| AZURE_TENANT_ID | ID tenant Azure AD |
+| AZURE_CLIENT_ID | ID application backend |
+| ENCRYPTION_KEY | Clé AES-256 |
+
+**Volumes :**
+- Hot reload du code source
+- Accès au package shared
+
+**Dépendances :**
+- Attend que PostgreSQL soit healthy
+
+### Configuration Frontend (dev)
+
+**Variables d'environnement :**
+| Variable | Description |
+|----------|-------------|
+| VITE_API_BASE_URL | http://localhost:3000/api/v1 |
+| VITE_AZURE_TENANT_ID | ID tenant Azure AD |
+| VITE_AZURE_CLIENT_ID | ID application frontend |
+| VITE_REDIRECT_URI | http://localhost:5173/callback |
+| VITE_POST_LOGOUT_URI | http://localhost:5173 |
 
 ### Dockerfile Backend (dev)
 
-```dockerfile
-# packages/backend/Dockerfile.dev
+**Base :** node:22-alpine
 
-FROM node:22-alpine
-
-WORKDIR /app
-
-# Copie des fichiers de dépendances
-COPY package*.json ./
-COPY tsconfig.json ./
-
-# Installation des dépendances
-RUN npm ci
-
-# Copie du code source
-COPY src ./src
-
-# Exposition du port
-EXPOSE 3000
-
-# Commande par défaut (sera overridée par docker-compose)
-CMD ["npm", "run", "dev"]
-```
+**Étapes :**
+1. Copie package*.json et tsconfig.json
+2. Installation des dépendances (npm ci)
+3. Copie du code source
+4. Exposition port 3000
+5. Commande : npm run dev (hot reload)
 
 ### Dockerfile Frontend (dev)
 
-```dockerfile
-# packages/frontend/Dockerfile.dev
+**Base :** node:22-alpine
 
-FROM node:22-alpine
+**Étapes :**
+1. Copie des fichiers de configuration (package.json, vite.config.ts, tsconfig*.json, index.html)
+2. Installation des dépendances
+3. Copie src et public
+4. Exposition port 5173
+5. Commande : npm run dev -- --host
 
-WORKDIR /app
+### Variables d'environnement (.env.example)
 
-# Copie des fichiers de dépendances
-COPY package*.json ./
-COPY vite.config.ts ./
-COPY tsconfig*.json ./
-COPY index.html ./
-
-# Installation des dépendances
-RUN npm ci
-
-# Copie du code source
-COPY src ./src
-COPY public ./public
-
-# Exposition du port
-EXPOSE 5173
-
-# Commande par défaut
-CMD ["npm", "run", "dev", "--", "--host"]
-```
-
-### Fichier .env.example
-
-```bash
-# .env.example
-
-# Base de données
-DB_USER=monitorage
-DB_PASSWORD=change_me_in_production
-DB_NAME=monitorage
-
-# Azure AD
-AZURE_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-AZURE_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-AZURE_CLIENT_ID_FRONTEND=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-
-# Chiffrement
-ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-
-# Connectors (optionnel en dev)
-TALEND_API_KEY=
-TALEND_BASE_URL=
-GITHUB_PAT=
-GITHUB_OWNER=
-GITHUB_REPO=
-KEYCLOAK_URL=
-KEYCLOAK_REALM=
-KEYCLOAK_CLIENT_ID=
-KEYCLOAK_CLIENT_SECRET=
-CLOUDFLARE_API_KEY=
-CLOUDFLARE_ZONE_ID=
-GLPI_API_KEY=
-GLPI_BASE_URL=
-JIRA_API_KEY=
-JIRA_BASE_URL=
-JIRA_PROJECT_KEY=
-JIRA_BOARD_ID=
-```
+| Catégorie | Variables |
+|-----------|-----------|
+| Base de données | DB_USER, DB_PASSWORD, DB_NAME |
+| Azure AD | AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_ID_FRONTEND |
+| Sécurité | ENCRYPTION_KEY |
+| Connectors | TALEND_API_KEY, TALEND_BASE_URL, GITHUB_PAT, GITHUB_OWNER, GITHUB_REPO, KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET, CLOUDFLARE_API_KEY, CLOUDFLARE_ZONE_ID, GLPI_API_KEY, GLPI_BASE_URL, JIRA_API_KEY, JIRA_BASE_URL, JIRA_PROJECT_KEY, JIRA_BOARD_ID |
 
 ---
 
@@ -413,9 +270,9 @@ JIRA_BOARD_ID=
 
 ### Ressources Azure
 
-| Ressource | SKU | Description |
-|-----------|-----|-------------|
-| Container Apps | Consumption | Backend Node.js |
+| Ressource | SKU recommandé | Description |
+|-----------|----------------|-------------|
+| Container Apps | Consumption | Backend Node.js + Express |
 | Storage Account | Standard_LRS | Frontend static files |
 | PostgreSQL Flexible Server | Burstable B1ms | Base de données |
 | Key Vault | Standard | Stockage des secrets |
@@ -424,265 +281,134 @@ JIRA_BOARD_ID=
 
 ### Dockerfile Backend (production)
 
-```dockerfile
-# packages/backend/Dockerfile
+**Stage 1 - Builder :**
+- Base : node:22-alpine
+- Installation dépendances
+- Build TypeScript
 
-FROM node:22-alpine AS builder
-
-WORKDIR /app
-
-# Copie des fichiers de dépendances
-COPY package*.json ./
-COPY tsconfig.json ./
-
-# Installation des dépendances
-RUN npm ci
-
-# Copie du code source
-COPY src ./src
-
-# Build TypeScript
-RUN npm run build
-
-# Stage de production
-FROM node:22-alpine AS production
-
-WORKDIR /app
-
-# Copie des dépendances de production uniquement
-COPY package*.json ./
-RUN npm ci --only=production
-
-# Copie du build
-COPY --from=builder /app/dist ./dist
-
-# User non-root
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
-USER nodejs
-
-# Exposition du port
-EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
-
-# Commande de démarrage
-CMD ["node", "dist/index.js"]
-```
+**Stage 2 - Production :**
+- Base : node:22-alpine
+- Dépendances production uniquement
+- Copie du build depuis stage 1
+- User non-root (nodejs:1001)
+- Exposition port 3000
+- Healthcheck : GET /health
+- Commande : node dist/index.js
 
 ### Configuration Container Apps
 
-```yaml
-# azure/container-apps.yaml
+**Ressources :**
+- CPU : 0.5
+- Memory : 1Gi
 
-containerApp:
-  name: monitorage-backend
-  location: westeurope
-  managedEnvironmentId: /subscriptions/.../managedEnvironments/monitorage-env
+**Scaling :**
+- Min replicas : 1
+- Max replicas : 3
+- Règle : 100 requêtes concurrentes
 
-  template:
-    containers:
-      - name: backend
-        image: monitorageacr.azurecr.io/monitorage-backend:latest
-        resources:
-          cpu: 0.5
-          memory: 1Gi
-        env:
-          - name: NODE_ENV
-            value: production
-          - name: PORT
-            value: "3000"
-          - name: DATABASE_URL
-            secretRef: database-url
-          - name: AZURE_TENANT_ID
-            secretRef: azure-tenant-id
-          - name: AZURE_CLIENT_ID
-            secretRef: azure-client-id
-          - name: ENCRYPTION_KEY
-            secretRef: encryption-key
+**Ingress :**
+- External : true
+- Target port : 3000
+- Transport : HTTP
+- Allow insecure : false
 
-    scale:
-      minReplicas: 1
-      maxReplicas: 3
-      rules:
-        - name: http-requests
-          http:
-            metadata:
-              concurrentRequests: "100"
-
-  configuration:
-    ingress:
-      external: true
-      targetPort: 3000
-      transport: http
-      allowInsecure: false
-
-    secrets:
-      - name: database-url
-        keyVaultUrl: https://monitorage-kv.vault.azure.net/secrets/database-url
-      - name: azure-tenant-id
-        keyVaultUrl: https://monitorage-kv.vault.azure.net/secrets/azure-tenant-id
-      - name: azure-client-id
-        keyVaultUrl: https://monitorage-kv.vault.azure.net/secrets/azure-client-id
-      - name: encryption-key
-        keyVaultUrl: https://monitorage-kv.vault.azure.net/secrets/encryption-key
-```
+**Secrets :**
+- Référencés depuis Key Vault
+- Variables : DATABASE_URL, AZURE_TENANT_ID, AZURE_CLIENT_ID, ENCRYPTION_KEY
 
 ### Déploiement Frontend (Static Website)
 
-```yaml
-# azure/storage-static-website.yaml
+**Configuration Storage Account :**
+- Static website enabled
+- Index document : index.html
+- 404 document : index.html (pour SPA routing)
 
-# Configuration via Azure CLI
-# az storage blob service-properties update --account-name monitoragefrontend --static-website --index-document index.html --404-document index.html
-
-# Déploiement via GitHub Actions
-# az storage blob upload-batch --account-name monitoragefrontend --source ./dist --destination '$web' --overwrite
-```
+**Déploiement :**
+- Upload batch vers container `$web`
+- Overwrite enabled
 
 ---
 
 ## CI/CD (GitHub Actions)
 
-### Workflow de déploiement
+### Pipeline de déploiement
 
-```yaml
-# .github/workflows/deploy.yml
+**Déclencheurs :**
+- Push sur `main`
+- Workflow dispatch avec choix d'environnement (staging/production)
 
-name: Deploy to Azure
+### Job : build-backend
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environnement cible'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-          - staging
-          - production
+**Étapes :**
+1. Checkout du code
+2. Login Azure Container Registry
+3. Build image Docker avec tag SHA
+4. Push image (SHA + latest)
 
-env:
-  REGISTRY: monitorageacr.azurecr.io
+### Job : build-frontend
 
-jobs:
-  build-backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+**Étapes :**
+1. Checkout du code
+2. Setup Node.js 22
+3. Install dependencies (npm ci)
+4. Build avec variables d'environnement
+5. Upload artifact
 
-      - name: Login to Azure Container Registry
-        uses: azure/docker-login@v1
-        with:
-          login-server: ${{ env.REGISTRY }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
+### Job : deploy-backend
 
-      - name: Build and push backend image
-        run: |
-          docker build -t ${{ env.REGISTRY }}/monitorage-backend:${{ github.sha }} ./packages/backend
-          docker push ${{ env.REGISTRY }}/monitorage-backend:${{ github.sha }}
-          docker tag ${{ env.REGISTRY }}/monitorage-backend:${{ github.sha }} ${{ env.REGISTRY }}/monitorage-backend:latest
-          docker push ${{ env.REGISTRY }}/monitorage-backend:latest
+**Prérequis :** build-backend
 
-  build-frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+**Étapes :**
+1. Login Azure
+2. Deploy sur Container Apps avec nouvelle image
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
+### Job : deploy-frontend
 
-      - name: Install dependencies
-        run: npm ci
-        working-directory: ./packages/frontend
+**Prérequis :** build-frontend
 
-      - name: Build frontend
-        run: npm run build
-        working-directory: ./packages/frontend
-        env:
-          VITE_API_BASE_URL: ${{ secrets.API_BASE_URL }}
-          VITE_AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          VITE_AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID_FRONTEND }}
+**Étapes :**
+1. Download artifact
+2. Login Azure
+3. Upload vers Storage Static Website
+4. Purge cache CDN
 
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-dist
-          path: ./packages/frontend/dist
+### Secrets GitHub requis
 
-  deploy-backend:
-    needs: build-backend
-    runs-on: ubuntu-latest
-    steps:
-      - name: Login to Azure
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Deploy to Container Apps
-        uses: azure/container-apps-deploy-action@v1
-        with:
-          containerAppName: monitorage-backend
-          resourceGroup: monitorage-rg
-          imageToDeploy: ${{ env.REGISTRY }}/monitorage-backend:${{ github.sha }}
-
-  deploy-frontend:
-    needs: build-frontend
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download frontend artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: ./dist
-
-      - name: Login to Azure
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Deploy to Storage Static Website
-        run: |
-          az storage blob upload-batch \
-            --account-name monitoragefrontend \
-            --source ./dist \
-            --destination '$web' \
-            --overwrite
-
-      - name: Purge CDN cache
-        run: |
-          az afd endpoint purge \
-            --resource-group monitorage-rg \
-            --profile-name monitorage-cdn \
-            --endpoint-name monitorage-frontend \
-            --content-paths "/*"
-```
+| Secret | Description |
+|--------|-------------|
+| ACR_USERNAME | Username Azure Container Registry |
+| ACR_PASSWORD | Password Azure Container Registry |
+| AZURE_CREDENTIALS | Service principal JSON |
+| API_BASE_URL | URL API production |
+| AZURE_TENANT_ID | ID tenant Azure AD |
+| AZURE_CLIENT_ID_FRONTEND | ID application frontend |
 
 ---
 
 ## Backup et reprise d'activité
 
-### Backup PostgreSQL
+### Backup PostgreSQL (Azure)
 
-- **Backup automatique** : Activé via Azure (7-35 jours de rétention)
-- **Point-in-time restore** : Disponible
-- **Geo-redundant backup** : Optionnel (recommandé en production)
+| Fonctionnalité | Configuration |
+|----------------|---------------|
+| Backup automatique | Activé |
+| Rétention | 7-35 jours |
+| Point-in-time restore | Disponible |
+| Geo-redundant backup | Optionnel (recommandé) |
 
 ### Stratégie de reprise
 
-| RTO cible | RPO cible | Stratégie |
-|-----------|-----------|-----------|
-| < 1h | < 5min | Backup automatique + PITR |
+| Métrique | Cible | Stratégie |
+|----------|-------|-----------|
+| RTO | < 1h | Redéploiement Container Apps + restore DB |
+| RPO | < 5min | Backup automatique + PITR |
+
+### Procédure de restore
+
+1. Créer un nouveau serveur PostgreSQL depuis backup
+2. Mettre à jour la connection string dans Key Vault
+3. Redémarrer Container Apps
+4. Vérifier la connectivité
 
 ---
 

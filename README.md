@@ -119,9 +119,9 @@ Les endpoints de monitoring **ne doivent pas être codés en dur**.
 
 # 🧱 Contraintes techniques
 
-- Backend : **NodeJS 22**
-  - API REST documentée via **Swagger / OpenAPI**.
-- Frontend : **React + Vite**, UI avec **MUI**.
+- Backend : **NodeJS 22** avec **TypeScript** et **Express**.
+  - API REST documentée via **Swagger / OpenAPI** qui doit être généré à partir du code.
+- Frontend : **React + Vite** avec **TypeScript**, UI avec **MUI**.
 - Le Swagger doit permettre de générer automatiquement un **client React**.
 - Authentification via **Azure App Registration** (OAuth2 / OIDC).
 - Architecture **mono-repo**.
@@ -192,5 +192,7 @@ Chaque fichier doit être autonome, clair et exploitable.
 - Précis, structuré, testable.
 - Hypothèses explicites quand nécessaire.
 - Pas de sur-ingénierie inutile.
+- N'inclue pas de code source, yaml, sql, uniquement des spécifications.
+- Ces spécifications peuvent tout de même inclure des exemples d'API, des schémas de données, des diagrammes de flux, des indications sur les patterns de code, architectures, etc.
 
 Ta réponse doit **uniquement contenir les fichiers PRD**, clairement séparés et nommés.

@@ -94,8 +94,8 @@ Cette fragmentation entraîne :
 ## Contraintes
 
 ### Techniques
-- Backend : **Node.js 22** avec API REST documentée (Swagger/OpenAPI)
-- Frontend : **React + Vite** avec **MUI** (Material-UI)
+- Backend : **Node.js 22** avec **TypeScript** et **Express**, API REST documentée (Swagger/OpenAPI généré depuis le code)
+- Frontend : **React + Vite** avec **TypeScript**, UI avec **MUI** (Material-UI)
 - Base de données : **PostgreSQL**
 - Authentification : **Azure App Registration** (OAuth2/OIDC)
 - Architecture : **Mono-repo**
